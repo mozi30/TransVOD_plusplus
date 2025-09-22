@@ -22,7 +22,7 @@ NODE_RANK=${NODE_RANK:-0}
 NNODES=1
 CUDA_VISIBLE_DEVICES=1
 # export CUDA_LAUNCH_BLOCKING=0
-python ./tools/launch.py \
+python3 ./tools/launch.py \
     --nnodes ${NNODES} \
     --node_rank ${NODE_RANK} \
     --master_addr ${MASTER_ADDR} \
