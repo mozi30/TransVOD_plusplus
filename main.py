@@ -281,6 +281,13 @@ def main(args):
             print('Missing Keys: {}'.format(missing_keys))
         if len(unexpected_keys) > 0:
             print('Unexpected Keys: {}'.format(unexpected_keys))
+        
+        # Load optimizer and scheduler state for proper resume
+        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            args.start_epoch = checkpoint['epoch'] + 1
+            print(f'Resuming from epoch {checkpoint["epoch"]}, will start at epoch {args.start_epoch}')
 
     if args.eval:
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,

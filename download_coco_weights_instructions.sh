@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Download COCO Pretrained Swin-B weights for TransVOD++
+# Manual download required from Google Drive
+
+echo "=========================================="
+echo "TransVOD++ COCO Pretrained Weights Setup"
+echo "=========================================="
+echo ""
+echo "You need to manually download the COCO pretrained Swin-B checkpoint:"
+echo ""
+echo "1. Go to: https://drive.google.com/drive/folders/1qXq6jz2-uvnUfa-IO2CoxsvEHnk93wee?usp=share_link"
+echo "   (or Baidu Netdisk: https://pan.baidu.com/s/1_8hCRWCXCSvqD4fsUYPnKA password:shm7)"
+echo ""
+echo "2. Download the file: swinb_checkpoint0048.pth"
+echo ""
+echo "3. Place it in: /root/TemporalAttentionPlayground/TransVOD_plusplus/exps/our_models/COCO_pretrained_model/"
+echo ""
+echo "Target location:"
+echo "   /root/TemporalAttentionPlayground/TransVOD_plusplus/exps/our_models/COCO_pretrained_model/swinb_checkpoint0048.pth"
+echo ""
+echo "=========================================="
+echo "Alternative: Train without COCO pretrained weights"
+echo "=========================================="
+echo ""
+echo "You can also train from scratch by modifying the config file:"
+echo "   Edit: configs/swinb_train_visdrone_single.sh"
+echo "   Remove or comment out the '--resume' and '--coco_pretrain' lines"
+echo ""
+echo "However, using COCO pretrained weights significantly improves convergence and final accuracy."
+echo ""
