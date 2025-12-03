@@ -180,8 +180,23 @@ def main(args):
             sampler_train = samplers.DistributedSampler(dataset_train)
             sampler_val = samplers.DistributedSampler(dataset_val, shuffle=False)
     else:
-        sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        # sample a smaller subset for faster runs / debugging
+        # prefer sampling WITHOUT replacement: use SubsetRandomSampler for train
+        num_train_samples = len(dataset_train) // 10
+        if num_train_samples > 0:
+            # random subset of indices without replacement
+            train_indices = torch.randperm(len(dataset_train))[:num_train_samples].tolist()
+            sampler_train = torch.utils.data.SubsetRandomSampler(train_indices)
+        else:
+            sampler_train = torch.utils.data.RandomSampler(dataset_train)
+
+        # for validation, take the first N frames (sequential)
+        num_val_samples = len(dataset_val) // 10
+        if num_val_samples > 0:
+            val_indices = list(range(num_val_samples))
+            sampler_val = torch.utils.data.SubsetRandomSampler(val_indices)
+        else:
+            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
     batch_sampler_train = torch.utils.data.BatchSampler(
         sampler_train, args.batch_size, drop_last=True)

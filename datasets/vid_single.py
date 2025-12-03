@@ -98,6 +98,7 @@ class ConvertCocoPolysToMask(object):
 
         classes = [obj["category_id"] for obj in anno]
         classes = torch.tensor(classes, dtype=torch.int64)
+        classes -= 1  # change to 0-based index
 
         if self.return_masks:
             segmentations = [obj["segmentation"] for obj in anno]
@@ -150,13 +151,13 @@ def make_coco_transforms(image_set):
     if image_set == 'train_vid' or image_set == "train_det" or image_set == "train_joint":
         return T.Compose([
             T.RandomHorizontalFlip(),
-            T.RandomResize([600], max_size=1000),
+            T.RandomResize([512], max_size=960),
             normalize,
         ])
 
     if image_set == 'val':
         return T.Compose([
-            T.RandomResize([600], max_size=1000),
+            T.RandomResize([512], max_size=960),
             normalize,
         ])
 
@@ -168,10 +169,10 @@ def build(image_set, args):
     assert root.exists(), f'provided COCO path {root} does not exist'
     mode = 'instances'
     PATHS = {
-        #"train_joint": [(root / "Data" / "DET", root / "annotations" / 'imagenet_det_30plus1cls_vid_train.json'), (root / "Data" / "VID", root / "annotations_10true" / 'imagenet_vid_train.json')],
+        # "train_joint": [(root / "Data" / "DET", root / "annotations" / 'imagenet_det_30plus1cls_vid_train.json'), (root / "Data" / "VID", root / "annotations_10true" / 'imagenet_vid_train.json')],
         #"train_det": [(root / "Data" / "DET", root / "annotations" / 'imagenet_det_30plus1cls_vid_train.json')],
         "train_vid": [(root / "Data" / "VID", root / "annotations" / 'imagenet_vid_train.json')],
-        #"train_joint": [(root / "Data" , root / "annotations" / 'imagenet_vid_train_joint_30.json')],
+        #"train_joint": [(root / "Data" / "VID", root / "annotations" / 'imagenet_vid_train.json')],  # Use train.json for joint training
         "val": [(root / "Data" / "VID", root / "annotations" / 'imagenet_vid_val.json')],
     }
     datasets = []
