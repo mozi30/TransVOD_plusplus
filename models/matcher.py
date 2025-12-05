@@ -69,6 +69,11 @@ class HungarianMatcher(nn.Module):
             out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid() # [batch_size * num_queries, num_classes]
             out_bbox = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
 
+            num_classes = out_prob.shape[1]
+            if any((v["labels"] < 0).any() or (v["labels"] >= num_classes).any() for v in targets):
+                print("Bad labels detected:", [v["labels"] for v in targets])
+                raise RuntimeError("Dataset labels out of range for model num_classes=%d" % num_classes)
+
             # Also concat the target labels and boxes
             tgt_ids = torch.cat([v["labels"] for v in targets]) 
             # print("tgt_ids_shape", tgt_ids.shape)
