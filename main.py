@@ -182,7 +182,7 @@ def main(args):
     else:
         # sample a smaller subset for faster runs / debugging
         # prefer sampling WITHOUT replacement: use SubsetRandomSampler for train
-        num_train_samples = len(dataset_train) // 10
+        num_train_samples = -1 #len(dataset_train) // 10
         if num_train_samples > 0:
             # random subset of indices without replacement
             train_indices = torch.randperm(len(dataset_train))[:num_train_samples].tolist()
@@ -191,7 +191,7 @@ def main(args):
             sampler_train = torch.utils.data.RandomSampler(dataset_train)
 
         # for validation, take the first N frames (sequential)
-        num_val_samples = len(dataset_val) // 10
+        num_val_samples = -1 #len(dataset_val) // 10
         if num_val_samples > 0:
             val_indices = list(range(num_val_samples))
             sampler_val = torch.utils.data.SubsetRandomSampler(val_indices)

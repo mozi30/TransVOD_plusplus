@@ -15,8 +15,9 @@ python -u main.py \
     --hidden_dim 256 \
     --dilation \
     --batch_size 1 \
-    --num_ref_frames 14 \
-    --resume ${EXP_DIR}/checkpoint0005.pth \
+    --num_ref_frames 8 \
+    --vid_path '/root/datasets/visdrone/transvod' \
+    --resume /root/TemporalAttentionPlayground/TransVOD_plusplus/exps/msda_swinbase_full_dataset_multi/checkpoint0004.pth \
     --lr_drop_epochs 4 5 \
     --num_workers 1 \
     --with_box_refine \
