@@ -44,9 +44,11 @@ class CocoDetection(TvCocoDetection):
     def __getitem__(self, idx):
         """
         Args:
-            index (int): Index
+            idx (int): Index
         Returns:
-            tuple: Tuple (image, target). target is the object returned by ``coco.loadAnns``.
+            tuple: (images, target)
+                images: Tensor [T*C, H, W] (concatenated along batch dim)
+                target: dict with boxes, labels, etc. for the key frame
         """
         imgs = []
 
@@ -57,76 +59,121 @@ class CocoDetection(TvCocoDetection):
         img_info = coco.loadImgs(img_id)[0]
         path = img_info['file_name']
         video_id = img_info['video_id']
+
         img = self.get_image(path)
-  
         target = {'image_id': img_id, 'annotations': target}
         img, target = self.prepare(img, target)
         imgs.append(img)
+
+        self.random_ref_frames = False
+
+        # ------------------------------------------------------------
+        # If not a video frame (video_id == -1), just duplicate key
+        # ------------------------------------------------------------
         if video_id == -1:
-            for i in range(self.num_ref_frames):
+            for _ in range(self.num_ref_frames):
                 imgs.append(img)
+            print("Warning: image {} not in a video, duplicating key frame.".format(img_id))
+
         else:
-            img_ids = self.cocovid.get_img_ids_from_vid(video_id) 
+            # All frames belonging to this video
+            img_ids = self.cocovid.get_img_ids_from_vid(video_id)
 
             ref_img_ids = []
-            if self.is_train:
-                interval = self.num_ref_frames + 2 # *20
-                left = max(img_ids[0], img_id - interval)
-                right = min(img_ids[-1], img_id + interval)
-                sample_range = list(range(left, right+1))
-                if self.num_ref_frames >= 10:
-                    sample_range=img_ids
 
-                if self.filter_key_img and img_id in sample_range:
-                    sample_range.remove(img_id) 
-                while len(sample_range) < self.num_ref_frames:
-                    # print("sample_range", sample_range)
-                    sample_range.extend(sample_range)
-                ref_img_ids = random.sample(sample_range, self.num_ref_frames)
+            # ========================================================
+            # MODE B: Global random frames from the whole video
+            # ========================================================
+            if getattr(self, "random_ref_frames", False):
+                # Sample uniformly from all frames in the video
+                available = img_ids.copy()
+                if self.filter_key_img and img_id in available:
+                    available.remove(img_id)
 
-            else:
-                ref_img_ids = []
-                Len = len(img_ids)
-                interval  = max(int(Len // 16), 1)
-
-                if self.num_ref_frames < 8:
-                    left_indexs = int((img_id - img_ids[0]) // interval)
-                    right_indexs = int((img_ids[-1] - img_id) // interval)
-                    if left_indexs < self.num_ref_frames:
-                        for i in range(self.num_ref_frames):
-                            ref_img_ids.append(min(img_id + (i+1)*interval, img_ids[-1]))
+                # If no other frames exist, fallback to duplicating key
+                if len(available) == 0:
+                    ref_img_ids = [img_id] * self.num_ref_frames
+                else:
+                    if len(available) >= self.num_ref_frames:
+                        # sample without replacement
+                        ref_img_ids = random.sample(available, self.num_ref_frames)
                     else:
-                        for i in range(self.num_ref_frames):
-                            ref_img_ids.append(max(img_id - (i+1)* interval, img_ids[0]))
+                        # not enough unique frames → sample with replacement
+                        ref_img_ids = random.choices(available, k=self.num_ref_frames)
 
-                sample_range = []
-                if self.num_ref_frames >= 8:
-                    left_indexs = int((img_ids[0] - img_id) // interval)
-                    right_indexs = int((img_ids[-1] - img_id) // interval)
-                    for i in range(left_indexs, right_indexs):
-                        if i < 0:
-                            index = max(img_id + i*interval, img_ids[0])
-                            sample_range.append(index)
-                        elif i > 0:
-                            index = min(img_id + i * interval, img_ids[-1])
-                            sample_range.append(index)
+            # ========================================================
+            # MODE A: Original behavior (local / interval-based)
+            # ========================================================
+            else:
+                if self.is_train:
+                    interval = self.num_ref_frames + 2
+                    left = max(img_ids[0], img_id - interval)
+                    right = min(img_ids[-1], img_id + interval)
+                    sample_range = list(range(left, right + 1))
+
+                    if self.num_ref_frames >= 10:
+                        sample_range = img_ids
+
                     if self.filter_key_img and img_id in sample_range:
                         sample_range.remove(img_id)
-                    while len(sample_range) < self.num_ref_frames:
-                        print("sample_range", sample_range)
-                        sample_range.extend(sample_range)
-                    ref_img_ids = sample_range[:self.num_ref_frames]
 
+                    # Ensure we have enough to sample from
+                    while len(sample_range) < self.num_ref_frames:
+                        sample_range.extend(sample_range)
+
+                    ref_img_ids = random.sample(sample_range, self.num_ref_frames)
+
+                else:
+                    ref_img_ids = []
+                    Len = len(img_ids)
+                    interval = max(int(Len // 16), 1)
+
+                    if self.num_ref_frames < 8:
+                        left_indexs = int((img_id - img_ids[0]) // interval)
+                        right_indexs = int((img_ids[-1] - img_id) // interval)
+                        if left_indexs < self.num_ref_frames:
+                            for i in range(self.num_ref_frames):
+                                ref_img_ids.append(min(img_id + (i + 1) * interval, img_ids[-1]))
+                        else:
+                            for i in range(self.num_ref_frames):
+                                ref_img_ids.append(max(img_id - (i + 1) * interval, img_ids[0]))
+
+                    sample_range = []
+                    if self.num_ref_frames >= 8:
+                        left_indexs = int((img_ids[0] - img_id) // interval)
+                        right_indexs = int((img_ids[-1] - img_id) // interval)
+                        for i in range(left_indexs, right_indexs):
+                            if i < 0:
+                                index = max(img_id + i * interval, img_ids[0])
+                                sample_range.append(index)
+                            elif i > 0:
+                                index = min(img_id + i * interval, img_ids[-1])
+                                sample_range.append(index)
+                        if self.filter_key_img and img_id in sample_range:
+                            sample_range.remove(img_id)
+                        while len(sample_range) < self.num_ref_frames:
+                            print("sample_range", sample_range)
+                            sample_range.extend(sample_range)
+                        ref_img_ids = sample_range[:self.num_ref_frames]
+
+            # --------------------------------------------------------
+            # Load reference images
+            # --------------------------------------------------------
             for ref_img_id in ref_img_ids:
                 ref_ann_ids = coco.getAnnIds(imgIds=ref_img_id)
                 ref_img_info = coco.loadImgs(ref_img_id)[0]
                 ref_img_path = ref_img_info['file_name']
                 ref_img = self.get_image(ref_img_path)
                 imgs.append(ref_img)
+
+        # ------------------------------------------------------------
+        # Apply transforms jointly to [key + refs]
+        # ------------------------------------------------------------
         if self._transforms is not None:
-            imgs, target = self._transforms(imgs, target) 
-        
-        return  torch.cat(imgs, dim=0),  target
+            imgs, target = self._transforms(imgs, target)
+
+        return torch.cat(imgs, dim=0), target
+
 
 
 def convert_coco_poly_to_mask(segmentations, height, width):
@@ -224,13 +271,13 @@ def make_coco_transforms(image_set):
     if image_set == 'train_vid' or image_set == "train_det" or image_set == "train_joint":
         return T.Compose([
             T.RandomHorizontalFlip(),
-            T.RandomResize([600], max_size=1000),
+            T.RandomResize([544], max_size=1000),
             normalize,
         ])
 
     if image_set == 'val':
         return T.Compose([
-            T.RandomResize([600], max_size=1000),
+            T.RandomResize([544], max_size=1000),
             normalize,
         ])
 
