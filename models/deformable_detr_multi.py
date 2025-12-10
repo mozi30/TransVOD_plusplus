@@ -424,6 +424,7 @@ class PostProcess(nn.Module):
         scores = topk_values
         topk_boxes = topk_indexes // out_logits.shape[2]
         labels = topk_indexes % out_logits.shape[2]
+        labels = labels + 1  # because we do not have a no-object class
         boxes = box_ops.box_cxcywh_to_xyxy(out_bbox)
         boxes = torch.gather(boxes, 1, topk_boxes.unsqueeze(-1).repeat(1,1,4))
 
