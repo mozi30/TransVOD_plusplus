@@ -17,6 +17,7 @@ import sys
 from typing import Iterable
 
 import torch
+from annotator import AnnotationOptions, Annotator, BBoxSpec, ImageOptions, PredFormat, gt_target_to_xyxy_pixels, tensor_to_pil, tv_det_to_xyxy_score_cls
 import util.misc as utils
 from datasets.coco_eval import CocoEvaluator
 from datasets.panoptic_eval import PanopticEvaluator
@@ -133,7 +134,7 @@ def evaluate1(model, criterion, postprocessors, data_loader, base_ds, device, ou
     print("Averaged stats:", metric_logger)
 
 @torch.no_grad()
-def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir):
+def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, inference=False, sample_size=-1):
     model.eval()
     criterion.eval()
 
@@ -152,6 +153,22 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             data_loader.dataset.ann_folder,
             output_dir=os.path.join(output_dir, "panoptic_eval"),
         )
+
+    annotator = Annotator(
+        image_opts=ImageOptions(channel_order="rgb"),
+        ann_opts=AnnotationOptions(
+            format=PredFormat(
+                bbox_start=0,
+                bbox_len=4,
+                bbox_spec=BBoxSpec(fmt="xyxy", normalized=False, exclusive_max=True),
+                score_index=4,
+                cls_index=5,
+            ),
+            class_names=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+        ),
+        preset="filled",
+        output_dir=os.path.join(output_dir, "annotated_results")
+    )
 
     for samples, targets  in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
@@ -178,6 +195,27 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             target_sizes = torch.stack([t["size"] for t in targets], dim=0)
             results = postprocessors['segm'](results, outputs, orig_target_sizes, target_sizes)
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}
+
+        if inference:
+            # For visualization: draw in the *transformed* image space (target["size"]).
+            # COCO evaluation above stays in original image space (orig_size).
+            vis_target_sizes = torch.stack([t["size"] for t in targets], dim=0)
+            results_vis = postprocessors['bbox'](outputs, vis_target_sizes)
+
+            result_draw = tv_det_to_xyxy_score_cls(results_vis)
+            target_draw = gt_target_to_xyxy_pixels(targets[0])
+            samples_pil = tensor_to_pil(samples)
+
+            img = annotator.draw(samples_pil[0], preds=result_draw, targets=target_draw, score_threshold=0.1)
+            annotator.save(image=img, name=f"{targets[0]['image_id'].item():012d}.jpg")
+            if sample_size is not None and sample_size > 0:
+                sample_size -=1
+            if sample_size == 0:
+                break
+
+
+
+
         if coco_evaluator is not None:
             coco_evaluator.update(res)
 

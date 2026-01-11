@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from datasets.vid_multi import PerturbSpec, PerturbSpec, PerturbationSettings, PerturbationType, Severity, Severity
 import datasets
 
 import datasets.samplers as samplers
@@ -133,8 +134,15 @@ def get_args_parser():
     parser.add_argument('--num_workers', default=0, type=int)
     parser.add_argument('--cache_mode', default=False, action='store_true', help='whether to cache images on memory')
 
-    return parser
+    parser.add_argument('--perturbation', default=False, action="store_true",help='use perturbation for eval')
+    parser.add_argument('--select_perturbation', default=PerturbationType.GAUSSIAN_NOISE, help='select perturbation type for eval')
+    parser.add_argument('--severity', default=Severity.LOW, help='perturbation severity for eval')
 
+    parser.add_argument('--inference', default=False, action='store_true')
+    parser.add_argument('--sample_size', default=None, type=int, help='number of samples for inference')
+
+    return parser
+    
 
 def main(args):
     if args.dataset_file == "vid_single":
@@ -145,16 +153,17 @@ def main(args):
         import util.misc_multi as utils
         # from engine_multi_mm import evaluate, train_one_epoch
         # import util.misc_mm as utils
-    print(args.dataset_file)
     device = torch.device(args.device)
     utils.init_distributed_mode(args)
-    print("git:\n  {}\n".format(utils.get_sha()))
 
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
-    print(args)
 
-
+    print("Perturbation:", args.perturbation)
+    print("Selected Perturbation:", args.select_perturbation)
+    print("Severity:", args.severity)
+    print("Interval:", args.interval1)
+    print("Number of Reference Frames:", args.num_ref_frames)
     # fix the seed for reproducibility
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
@@ -166,13 +175,30 @@ def main(args):
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
+
+    if args.perturbation:
+        selected_perturbation = args.select_perturbation
+        severity = args.severity
+
+
+
+        perturb = PerturbationSettings(
+            enabled=True,
+            seed=123,
+            shuffle_order=True,
+            specs=[
+                PerturbSpec(selected_perturbation, active=True, severity=severity, p=1),
+            ],
+        )
+    else:
+        perturb = PerturbationSettings(enabled=False)
+
+    args.perturbation = perturb
 
     dataset_train = build_dataset(image_set='train_vid', args=args)
     dataset_val = build_dataset(image_set='val', args=args)
 
     if args.distributed:
-        print("11111")
         if args.cache_mode:
             sampler_train = samplers.NodeDistributedSampler(dataset_train)
             sampler_val = samplers.NodeDistributedSampler(dataset_val, shuffle=False)
@@ -182,7 +208,7 @@ def main(args):
     else:
         # sample a smaller subset for faster runs / debugging
         # prefer sampling WITHOUT replacement: use SubsetRandomSampler for train
-        num_train_samples = -1 #len(dataset_train) // 10
+        num_train_samples = len(dataset_train) // 50
         if num_train_samples > 0:
             # random subset of indices without replacement
             train_indices = torch.randperm(len(dataset_train))[:num_train_samples].tolist()
@@ -191,7 +217,7 @@ def main(args):
             sampler_train = torch.utils.data.RandomSampler(dataset_train)
 
         # for validation, take the first N frames (sequential)
-        num_val_samples = -1 #len(dataset_val) // 10
+        num_val_samples = len(dataset_val) // 50
         if num_val_samples > 0:
             val_indices = list(range(num_val_samples))
             sampler_val = torch.utils.data.SubsetRandomSampler(val_indices)
@@ -217,8 +243,8 @@ def main(args):
                 break
         return out
 
-    for n, p in model_without_ddp.named_parameters():
-        print(n)
+    #for n, p in model_without_ddp.named_parameters():
+        #print(n)
 
     param_dicts = [
         {
@@ -242,7 +268,7 @@ def main(args):
     else:
         optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
                                       weight_decay=args.weight_decay)
-    print(args.lr_drop_epochs)
+    #print(args.lr_drop_epochs)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, args.lr_drop_epochs)
 
     if args.distributed:
@@ -276,8 +302,8 @@ def main(args):
                 for k, v in checkpoint['model'].items():
                     if ('class_embed' not in k) :
                         tmp_dict[k] = v 
-                    else:
-                        print('k', k)
+                    #else:
+                        #print('k', k)
             else:
                 # multi-frame (TransVOD++)
                 tmp_dict = checkpoint['model']
@@ -296,6 +322,13 @@ def main(args):
             print('Missing Keys: {}'.format(missing_keys))
         if len(unexpected_keys) > 0:
             print('Unexpected Keys: {}'.format(unexpected_keys))
+
+    if args.inference:
+        sample_size = 10 if args.sample_size is None else args.sample_size
+        test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
+                                              data_loader_val, base_ds, device, args.output_dir, inference=True, sample_size=sample_size)
+
+        return
 
     if args.eval:
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,

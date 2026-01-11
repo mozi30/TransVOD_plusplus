@@ -17,6 +17,7 @@ import sys
 from typing import Iterable
 
 import torch
+from annotator import AnnotationOptions, Annotator, BBoxSpec, ImageOptions, PredFormat
 import util.misc as utils
 from datasets.coco_eval import CocoEvaluator
 from datasets.panoptic_eval import PanopticEvaluator
@@ -40,12 +41,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
     for _ in metric_logger.log_every(range(len(data_loader)), print_freq, header):
-
+        
         outputs = model(samples)
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
- 
+
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
         loss_dict_reduced_unscaled = {f'{k}_unscaled': v
@@ -168,7 +169,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 #     return stats, coco_evaluator
 
 @torch.no_grad()
-def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir):
+def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, inference=False, sample_size=-1):
     model.eval()
     criterion.eval()
 
@@ -179,6 +180,21 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     iou_types = tuple(k for k in ('segm', 'bbox') if k in postprocessors.keys())
     coco_evaluator = CocoEvaluator(base_ds, iou_types)
     # coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
+
+    annotator = Annotator(
+        image_opts=ImageOptions(channel_order="rgb"),
+        ann_opts=AnnotationOptions(
+            format=PredFormat(
+                bbox_start=0,
+                bbox_len=4,
+                bbox_spec=BBoxSpec(fmt="xyxy", normalized=False),
+                score_index=4,
+                cls_index=5,
+            ),
+            class_names=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+        ),
+        preset="filled",
+    )
 
     panoptic_evaluator = None
     if 'panoptic' in postprocessors.keys():
@@ -299,6 +315,11 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
         if 'segm' in postprocessors.keys():
             target_sizes = torch.stack([t["size"] for t in targets], dim=0)
             results = postprocessors['segm'](results, outputs, orig_target_sizes, target_sizes)
+        
+        print("results", results)
+        exit(0)
+            
+
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}
         if coco_evaluator is not None:
             coco_evaluator.update(res)

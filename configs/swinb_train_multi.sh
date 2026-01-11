@@ -19,7 +19,7 @@ python -u main.py \
     --num_ref_frames 15 \
     --resume /root/TemporalAttentionPlayground/TransVOD_plusplus/exps/msda_swinbase_full_dataset/checkpoint0008.pth \
     --with_box_refine \
-    --vid_path '/root/datasets/visdrone/transvod' \
+    --vid_path '/home/mozi/datasets/visdrone/transvod' \
     --dataset_file 'vid_multi' \
     --output_dir ${EXP_DIR} \
     ${PY_ARGS} 2>&1 | tee ${EXP_DIR}/log.train.$T
