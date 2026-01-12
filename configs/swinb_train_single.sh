@@ -19,11 +19,11 @@ python -u main.py \
   --num_queries 100 \
   --hidden_dim 256 \
   --dilation \
-  --batch_size 4 \
+  --batch_size 6 \
   --num_workers 4 \
   --with_box_refine \
   --coco_pretrain \
-  --resume '/root/TemporalAttentionPlayground/TransVOD_plusplus/exps/msda_swinbase_full_dataset/checkpoint0020.pth' \
+  --resume '/root/weights/transvod/checkpoint.pth' \
   --vid_path '/root/datasets/visdrone/transvod' \
   --dataset_file 'vid_single' \
   --output_dir exps/msda_swinbase_full_dataset

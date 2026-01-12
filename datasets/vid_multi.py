@@ -319,81 +319,63 @@ class CocoDetection(TvCocoDetection):
             # MODE A: Original behavior (local / interval-based)
             # ========================================================
             else:
-                if self.is_train:
-                    interval = self.num_ref_frames + 2
-                    left = max(img_ids[0], img_id - interval)
-                    right = min(img_ids[-1], img_id + interval)
-                    sample_range = list(range(left, right + 1))
+                
+                ref_img_ids = pick_ref_img_ids(img_ids, img_id, self.num_ref_frames, self.interval1, self.filter_key_img)
+                if( not self.printed_one_time):
+                    print("Using pick_ref_img_ids with interval {} to select reference frames.".format(self.interval1))
+                    print("Image ID: {}, Video ID: {}, Available frames: {}, Selected ref frames: {}".format(img_id, video_id, img_ids, ref_img_ids))   
+                    self.printed_one_time = True
+                # ref_img_ids = []
+                # Len = len(img_ids)
+                # interval = max(int(Len // self.interval1), 1)
 
-                    if self.num_ref_frames >= 10:
-                        sample_range = img_ids
+                # if self.num_ref_frames < 8:
+                #     left_indexs = int((img_id - img_ids[0]) // interval)
+                #     right_indexs = int((img_ids[-1] - img_id) // interval)
+                #     if left_indexs < self.num_ref_frames:
+                #         for i in range(self.num_ref_frames):
+                #             ref_img_ids.append(min(img_id + (i + 1) * interval, img_ids[-1]))
+                #     else:
+                #         for i in range(self.num_ref_frames):
+                #             ref_img_ids.append(max(img_id - (i + 1) * interval, img_ids[0]))
 
-                    if self.filter_key_img and img_id in sample_range:
-                        sample_range.remove(img_id)
+                # sample_range = []
+                # if self.num_ref_frames >= 8:
+                #     left_indexs = int((img_ids[0] - img_id) // interval)
+                #     right_indexs = int((img_ids[-1] - img_id) // interval)
+                #     for i in range(left_indexs, right_indexs):
+                #         if i < 0:
+                #             index = max(img_id + i * interval, img_ids[0])
+                #             sample_range.append(index)
+                #         elif i > 0:
+                #             index = min(img_id + i * interval, img_ids[-1])
+                #             sample_range.append(index)
+                #     if self.filter_key_img and img_id in sample_range:
+                #         sample_range.remove(img_id)
 
-                    # Ensure we have enough to sample from
-                    while len(sample_range) < self.num_ref_frames:
-                        sample_range.extend(sample_range)
+                #     # Ensure unique samples
+                #     unique_samples = set(sample_range)
+                #     while len(unique_samples) < self.num_ref_frames:
+                #         interval += 1  # Increase interval to find more unique samples
+                #         sample_range = []
+                #         left_indexs = int((img_ids[0] - img_id) // interval)
+                #         right_indexs = int((img_ids[-1] - img_id) // interval)
+                #         for i in range(left_indexs, right_indexs):
+                #             if i < 0:
+                #                 index = max(img_id + i * interval, img_ids[0])
+                #                 sample_range.append(index)
+                #             elif i > 0:
+                #                 index = min(img_id + i * interval, img_ids[-1])
+                #                 sample_range.append(index)
+                #         unique_samples = set(sample_range)
 
-                    ref_img_ids = random.sample(sample_range, self.num_ref_frames)
+                #     # Ensure we have the required number of unique samples
+                #     while len(unique_samples) < self.num_ref_frames:
+                #         closest = min(unique_samples, key=lambda x: abs(x - img_id))
+                #         unique_samples.add(closest)
 
-                else:
-                    ref_img_ids = pick_ref_img_ids(img_ids, img_id, self.num_ref_frames, self.interval1, self.filter_key_img)
-                    if( not self.printed_one_time):
-                        print("Using pick_ref_img_ids with interval {} to select reference frames.".format(self.interval1))
-                        print("Image ID: {}, Video ID: {}, Available frames: {}, Selected ref frames: {}".format(img_id, video_id, img_ids, ref_img_ids))   
-                        self.printed_one_time = True
-                    # ref_img_ids = []
-                    # Len = len(img_ids)
-                    # interval = max(int(Len // self.interval1), 1)
-
-                    # if self.num_ref_frames < 8:
-                    #     left_indexs = int((img_id - img_ids[0]) // interval)
-                    #     right_indexs = int((img_ids[-1] - img_id) // interval)
-                    #     if left_indexs < self.num_ref_frames:
-                    #         for i in range(self.num_ref_frames):
-                    #             ref_img_ids.append(min(img_id + (i + 1) * interval, img_ids[-1]))
-                    #     else:
-                    #         for i in range(self.num_ref_frames):
-                    #             ref_img_ids.append(max(img_id - (i + 1) * interval, img_ids[0]))
-
-                    # sample_range = []
-                    # if self.num_ref_frames >= 8:
-                    #     left_indexs = int((img_ids[0] - img_id) // interval)
-                    #     right_indexs = int((img_ids[-1] - img_id) // interval)
-                    #     for i in range(left_indexs, right_indexs):
-                    #         if i < 0:
-                    #             index = max(img_id + i * interval, img_ids[0])
-                    #             sample_range.append(index)
-                    #         elif i > 0:
-                    #             index = min(img_id + i * interval, img_ids[-1])
-                    #             sample_range.append(index)
-                    #     if self.filter_key_img and img_id in sample_range:
-                    #         sample_range.remove(img_id)
-
-                    #     # Ensure unique samples
-                    #     unique_samples = set(sample_range)
-                    #     while len(unique_samples) < self.num_ref_frames:
-                    #         interval += 1  # Increase interval to find more unique samples
-                    #         sample_range = []
-                    #         left_indexs = int((img_ids[0] - img_id) // interval)
-                    #         right_indexs = int((img_ids[-1] - img_id) // interval)
-                    #         for i in range(left_indexs, right_indexs):
-                    #             if i < 0:
-                    #                 index = max(img_id + i * interval, img_ids[0])
-                    #                 sample_range.append(index)
-                    #             elif i > 0:
-                    #                 index = min(img_id + i * interval, img_ids[-1])
-                    #                 sample_range.append(index)
-                    #         unique_samples = set(sample_range)
-
-                    #     # Ensure we have the required number of unique samples
-                    #     while len(unique_samples) < self.num_ref_frames:
-                    #         closest = min(unique_samples, key=lambda x: abs(x - img_id))
-                    #         unique_samples.add(closest)
-
-                    #     ref_img_ids = sorted(unique_samples)[:self.num_ref_frames]
-                    #     ref_img_ids.sort()
+                #     ref_img_ids = sorted(unique_samples)[:self.num_ref_frames]
+                #     ref_img_ids.sort()
 
             # --------------------------------------------------------
             # Load reference images

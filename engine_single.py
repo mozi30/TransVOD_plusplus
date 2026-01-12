@@ -315,9 +315,6 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
         if 'segm' in postprocessors.keys():
             target_sizes = torch.stack([t["size"] for t in targets], dim=0)
             results = postprocessors['segm'](results, outputs, orig_target_sizes, target_sizes)
-        
-        print("results", results)
-        exit(0)
             
 
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}

@@ -85,7 +85,7 @@ def get_args_parser():
     parser.add_argument('--dec_n_points', default=4, type=int)
     parser.add_argument('--enc_n_points', default=4, type=int)
     parser.add_argument('--n_temporal_decoder_layers', default=1, type=int)
-    parser.add_argument('--interval1', default=20, type=int)
+    parser.add_argument('--interval1', default=8, type=int)
     parser.add_argument('--interval2', default=60, type=int)
 
     parser.add_argument("--fixed_pretrained_model", default=False, action='store_true')
@@ -160,10 +160,12 @@ def main(args):
         assert args.masks, "Frozen training is meant for segmentation only"
 
     print("Perturbation:", args.perturbation)
-    print("Selected Perturbation:", args.select_perturbation)
-    print("Severity:", args.severity)
-    print("Interval:", args.interval1)
-    print("Number of Reference Frames:", args.num_ref_frames)
+    if args.perturbation:
+        print("Selected Perturbation:", args.select_perturbation)
+        print("Severity:", args.severity)
+    if args.dataset_file == "vid_multi":
+        print("Interval:", args.interval1)
+        print("Number of Reference Frames:", args.num_ref_frames)
     # fix the seed for reproducibility
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
@@ -208,7 +210,7 @@ def main(args):
     else:
         # sample a smaller subset for faster runs / debugging
         # prefer sampling WITHOUT replacement: use SubsetRandomSampler for train
-        num_train_samples = len(dataset_train) // 50
+        num_train_samples = len(dataset_train) // 10
         if num_train_samples > 0:
             # random subset of indices without replacement
             train_indices = torch.randperm(len(dataset_train))[:num_train_samples].tolist()
@@ -217,7 +219,7 @@ def main(args):
             sampler_train = torch.utils.data.RandomSampler(dataset_train)
 
         # for validation, take the first N frames (sequential)
-        num_val_samples = len(dataset_val) // 50
+        num_val_samples = len(dataset_val) // 10
         if num_val_samples > 0:
             val_indices = list(range(num_val_samples))
             sampler_val = torch.utils.data.SubsetRandomSampler(val_indices)
