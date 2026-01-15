@@ -23,13 +23,22 @@ from .torchvision_datasets import CocoDetection as TvCocoDetection
 from util.misc import get_local_rank, get_local_size
 import datasets.transforms_single as T
 from torch.utils.data.dataset import ConcatDataset
+from datasets.vid_multi import PerturbationType, resolve_params, PerturbationSettings, PerturbSpec, Severity, PerturbationType
+import random
+
+import numpy as np
+import cv2
+import torch
+from PIL import Image
 
 class CocoDetection(TvCocoDetection):
-    def __init__(self, img_folder, ann_file, transforms, return_masks, cache_mode=False, local_rank=0, local_size=1):
+    def __init__(self, img_folder, ann_file, transforms, return_masks, cache_mode=False, local_rank=0, local_size=1, perturbation=None):
         super(CocoDetection, self).__init__(img_folder, ann_file,
-                                            cache_mode=cache_mode, local_rank=local_rank, local_size=local_size)
+                                            cache_mode=cache_mode, local_rank=local_rank, local_size=local_size,)
         self._transforms = transforms
         self.prepare = ConvertCocoPolysToMask(return_masks)
+        self.perturbation = perturbation
+        self._rng = self.perturbation.rng()
 
     def __getitem__(self, idx):
         """
@@ -51,11 +60,82 @@ class CocoDetection(TvCocoDetection):
         image_id = img_id
         target = {'image_id': image_id, 'annotations': target}
 
+        img_opencv_bgr = to_opencv_bgr(img)
+        img_pertubated = self.apply_perturbation(img_opencv_bgr)
+        img = to_pil_rgb(img_pertubated)
+
         img, target = self.prepare(img, target)
         if self._transforms is not None:
             img, target = self._transforms(img, target)
 
         return img, target
+
+    def apply_perturbation(self, img):
+            if self.perturbation.enabled:
+
+                specs = [s for s in self.perturbation.specs if s.active]
+                if self.perturbation.shuffle_order:
+                    self._rng.shuffle(specs)
+
+                for s in specs:
+                    if self._rng.random() > s.p:
+                        continue
+                    params = resolve_params(s, self._rng)
+                    typ = s.type
+                    if typ == PerturbationType.GAUSSIAN_NOISE:
+                        std_dev = params.get("std_dev", 0.05)
+                        noise = np.random.normal(0, std_dev * 255, img.shape).astype(np.float32)
+                        img = img.astype(np.float32) + noise
+                        img = np.clip(img, 0, 255).astype(np.uint8)
+                        return img
+                    if typ == PerturbationType.DEFOCUS_BLUR:
+                        kernel_size = params.get("kernel_size", 7)
+                        kernel = np.zeros((kernel_size, kernel_size), dtype=np.float32)
+                        cv2.circle(kernel, (kernel_size // 2, kernel_size // 2), kernel_size // 2, 1, -1)
+                        kernel /= np.sum(kernel)
+                        img = cv2.filter2D(img, -1, kernel)
+                        return img
+                    if typ == PerturbationType.MOTION_BLUR:
+                        kernel_size = params.get("kernel_size", 15)
+                        angle = params.get("angle", 0.0)
+                        kernel = np.zeros((kernel_size, kernel_size), dtype=np.float32)
+                        xs = np.linspace(-kernel_size // 2, kernel_size // 2, kernel_size)
+                        ys = np.tan(np.deg2rad(angle)) * xs
+                        for i in range(kernel_size):
+                            x = int(xs[i] + kernel_size // 2)
+                            y = int(ys[i] + kernel_size // 2)
+                            if 0 <= x < kernel_size and 0 <= y < kernel_size:
+                                kernel[y, x] = 1
+                        kernel /= np.sum(kernel)
+                        img = cv2.filter2D(img, -1, kernel)
+                        return img
+                    if typ == PerturbationType.BRIGHTNESS_CHANGE:
+                        factor = params.get("factor", 1.25)
+                        img = img.astype(np.float32) * factor
+                        img = np.clip(img, 0, 255).astype(np.uint8)
+                        return img
+                    if typ == PerturbationType.CONTRAST_CHANGE:
+                        factor = params.get("factor", 1.25)
+                        mean = np.mean(img, axis=(0, 1), keepdims=True)
+                        img = (img.astype(np.float32) - mean) * factor + mean
+                        img = np.clip(img, 0, 255).astype(np.uint8)
+                        return img
+                    if typ == PerturbationType.PIXELATION:
+                        pixel_size = params.get("pixel_size", 8)
+                        h, w = img.shape[:2]
+                        temp = cv2.resize(img, (w // pixel_size, h // pixel_size), interpolation=cv2.INTER_LINEAR)
+                        img = cv2.resize(temp, (w, h), interpolation=cv2.INTER_NEAREST)
+                        return img
+                    if typ == PerturbationType.JPEG_COMPRESSION:
+                        quality = params.get("quality", 50)
+                        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                        _, encimg = cv2.imencode('.jpg', img, encode_param)
+                        img = cv2.imdecode(encimg, 1)
+                        return img
+                    raise ValueError(f"Unsupported perturbation type: {typ}")
+                    # If your pipeline expects CHW afterward, transpose back:
+            return img
+
 
 
 def convert_coco_poly_to_mask(segmentations, height, width):
@@ -177,10 +257,121 @@ def build(image_set, args):
     }
     datasets = []
     for (img_folder, ann_file) in PATHS[image_set]:
-        dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set), return_masks=args.masks, cache_mode=args.cache_mode, local_rank=get_local_rank(), local_size=get_local_size())
+        dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set), return_masks=args.masks, cache_mode=args.cache_mode, local_rank=get_local_rank(), local_size=get_local_size(), perturbation=args.perturbation)
         datasets.append(dataset)
     if len(datasets) == 1:
         return datasets[0]
     return ConcatDataset(datasets)
+
+
+def to_opencv_bgr(img):
+    """
+    Accepts:
+      - PIL.Image (RGB)
+      - np.ndarray (HWC or CHW, RGB or BGR)
+      - torch.Tensor (CHW or HWC, RGB, float or uint8)
+
+    Returns:
+      - np.ndarray, uint8, HWC, BGR, [0..255]
+    """
+
+    # --- PIL Image (RGB, HWC) ---
+    if Image is not None and isinstance(img, Image.Image):
+        img = np.array(img)                 # HWC, RGB, uint8
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return img
+
+    # --- Torch Tensor ---
+    if torch is not None and isinstance(img, torch.Tensor):
+        img = img.detach().cpu()
+
+        # CHW -> HWC
+        if img.ndim == 3 and img.shape[0] in (1, 3, 4):
+            img = img.permute(1, 2, 0)
+
+        img = img.numpy()
+
+        # float -> uint8
+        if img.dtype != np.uint8:
+            img = np.clip(img * 255 if img.max() <= 1.0 else img, 0, 255).astype(np.uint8)
+
+        # RGB -> BGR
+        if img.ndim == 3 and img.shape[2] == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        return img
+
+    # --- NumPy array ---
+    if isinstance(img, np.ndarray):
+
+        # CHW -> HWC
+        if img.ndim == 3 and img.shape[0] in (1, 3, 4):
+            img = np.transpose(img, (1, 2, 0))
+
+        # float -> uint8
+        if img.dtype != np.uint8:
+            img = np.clip(img * 255 if img.max() <= 1.0 else img, 0, 255).astype(np.uint8)
+
+        # Assume RGB -> BGR if 3 channels
+        if img.ndim == 3 and img.shape[2] == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        return img
+
+    raise TypeError(f"Unsupported image type: {type(img)}")
+
+def to_pil_rgb(img):
+    """
+    Accepts:
+      - PIL.Image
+      - np.ndarray (HWC or CHW, RGB or BGR)
+      - torch.Tensor (CHW or HWC, RGB, float or uint8)
+
+    Returns:
+      - PIL.Image.Image (RGB)
+    """
+
+    # --- Already PIL ---
+    if Image is not None and isinstance(img, Image.Image):
+        return img.convert("RGB")
+
+    # --- Torch Tensor ---
+    if torch is not None and isinstance(img, torch.Tensor):
+        img = img.detach().cpu()
+
+        # CHW -> HWC
+        if img.ndim == 3 and img.shape[0] in (1, 3, 4):
+            img = img.permute(1, 2, 0)
+
+        img = img.numpy()
+
+        # float -> uint8
+        if img.dtype != np.uint8:
+            img = np.clip(img * 255 if img.max() <= 1.0 else img, 0, 255).astype(np.uint8)
+
+        # Assume BGR -> RGB if 3 channels
+        if img.ndim == 3 and img.shape[2] == 3:
+            img = img[..., ::-1]
+
+        return Image.fromarray(img, mode="RGB")
+
+    # --- NumPy array ---
+    if isinstance(img, np.ndarray):
+
+        # CHW -> HWC
+        if img.ndim == 3 and img.shape[0] in (1, 3, 4):
+            img = np.transpose(img, (1, 2, 0))
+
+        # float -> uint8
+        if img.dtype != np.uint8:
+            img = np.clip(img * 255 if img.max() <= 1.0 else img, 0, 255).astype(np.uint8)
+
+        # Assume BGR -> RGB if 3 channels
+        if img.ndim == 3 and img.shape[2] == 3:
+            img = img[..., ::-1]
+
+        return Image.fromarray(img, mode="RGB")
+
+    raise TypeError(f"Unsupported image type: {type(img)}")
 
     
